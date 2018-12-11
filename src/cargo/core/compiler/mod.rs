@@ -48,7 +48,7 @@ mod output_depinfo;
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy, PartialOrd, Ord, Serialize)]
 pub enum Kind {
     Host,
-    Target,
+    Target
 }
 
 /// A glorified callback for executing calls to rustc. Rather than calling rustc
@@ -242,6 +242,8 @@ fn rustc<'a, 'cfg>(
         .unwrap_or_else(|| cx.bcx.config.cwd())
         .to_path_buf();
 
+    let in_cache = cx.in_cache(unit);
+
     return Ok(Work::new(move |state| {
         // Only at runtime have we discovered what the extra -L and -l
         // arguments are for native libraries, so we process those here. We
@@ -292,24 +294,30 @@ fn rustc<'a, 'cfg>(
 
         state.running(&rustc);
         if json_messages {
-            exec.exec_json(
-                rustc,
-                package_id,
-                &target,
-                mode,
-                &mut assert_is_empty,
-                &mut |line| json_stderr(line, package_id, &target),
-            )
-            .map_err(internal_if_simple_exit_code)
-            .chain_err(|| format!("Could not compile `{}`.", name))?;
+            if !in_cache
+            {
+                exec.exec_json(
+                    rustc,
+                    package_id,
+                    &target,
+                    mode,
+                    &mut assert_is_empty,
+                    &mut |line| json_stderr(line, package_id, &target),
+                )
+                .map_err(internal_if_simple_exit_code)
+                .chain_err(|| format!("Could not compile `{}`.", name))?;
+            }
         } else if build_plan {
             state.build_plan(buildkey, rustc.clone(), outputs.clone());
         } else {
-            exec.exec_and_capture_output(rustc, package_id, &target, mode, state)
-                .map_err(internal_if_simple_exit_code)
-                .chain_err(|| format!("Could not compile `{}`.", name))?;
+            if !in_cache {
+                exec.exec_and_capture_output(rustc, package_id, &target, mode, state)
+                    .map_err(internal_if_simple_exit_code)
+                    .chain_err(|| format!("Could not compile `{}`.", name))?;
+            }
         }
 
+        //TODO: handle the rename ?
         if do_rename && real_name != crate_name {
             let dst = &outputs[0].path;
             let src = dst.with_file_name(
@@ -917,6 +925,10 @@ fn build_deps_args<'a, 'cfg>(
     cmd.arg("-L").arg(&{
         let mut deps = OsString::from("dependency=");
         deps.push(cx.files().deps_dir(unit));
+        deps
+    }).arg("-L").arg(&{
+        let mut deps = OsString::from("dependency=");
+        deps.push(cx.files().cache_dir());
         deps
     });
 

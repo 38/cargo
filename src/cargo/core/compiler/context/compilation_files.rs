@@ -5,6 +5,8 @@ use std::hash::{Hash, Hasher, SipHasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use std::collections::HashSet;
+
 use lazycell::LazyCell;
 
 use super::{BuildContext, Context, FileFlavor, Kind, Layout, Unit};
@@ -30,6 +32,10 @@ pub struct CompilationFiles<'a, 'cfg: 'a> {
     /// The root targets requested by the user on the command line (does not
     /// include dependencies).
     roots: Vec<Unit<'a>>,
+    primary: HashSet<Unit<'a>>,
+
+    bin_cache: PathBuf, //TODO: implement the actual binary cache
+
     ws: &'a Workspace<'cfg>,
     metas: HashMap<Unit<'a>, Option<Metadata>>,
     /// For each Unit, a list all files produced.
@@ -69,14 +75,19 @@ impl<'a, 'cfg: 'a> CompilationFiles<'a, 'cfg> {
         cx: &Context<'a, 'cfg>,
     ) -> CompilationFiles<'a, 'cfg> {
         let mut metas = HashMap::new();
+        let mut primary = HashSet::new();
         for unit in roots {
             metadata_of(unit, cx, &mut metas);
+            if cx.is_primary_package(unit) {
+                primary.insert(unit.clone());
+            }
         }
         let outputs = metas
             .keys()
             .cloned()
             .map(|unit| (unit, LazyCell::new()))
             .collect();
+
         CompilationFiles {
             ws,
             host,
@@ -85,6 +96,8 @@ impl<'a, 'cfg: 'a> CompilationFiles<'a, 'cfg> {
             roots: roots.to_vec(),
             metas,
             outputs,
+            primary,
+            bin_cache: "/tmp/cache/".parse().unwrap() //TOOD
         }
     }
 
@@ -121,8 +134,37 @@ impl<'a, 'cfg: 'a> CompilationFiles<'a, 'cfg> {
         } else if unit.target.is_example() {
             self.layout(unit.kind).examples().to_path_buf()
         } else {
+            /* Should we redirect the depdency to global cache ? */
+            if !self.primary.contains(unit) {
+                //TODO: visit the cache
+                return self.bin_cache.clone();
+            }
             self.deps_dir(unit).to_path_buf()
         }
+    }
+
+    pub fn in_cache(&self, unit: &Unit<'a>, bcx: &BuildContext<'a, 'cfg>) -> bool {
+        // TODO: check if the dep is already in the global cache
+        let primary = self.primary.contains(unit);
+
+        if !primary {
+            let outputs = self.outputs(unit, bcx);
+            if let Ok(outputs) = outputs 
+            {
+                return !outputs.iter().any(|out| {
+                    // TODO: how to touch the file
+                    let mt = std::fs::metadata(out.path.as_path());
+                    !mt.is_ok()
+                });
+            }
+        }
+
+        return false;
+    }
+
+    pub fn cache_dir(&self) -> &str {
+        // TODO: determine the cache location
+        return "/tmp/cache";
     }
 
     pub fn export_dir(&self) -> Option<PathBuf> {
@@ -149,6 +191,10 @@ impl<'a, 'cfg: 'a> CompilationFiles<'a, 'cfg> {
     /// Returns the directories where Rust crate dependencies are found for the
     /// specified unit.
     pub fn deps_dir(&self, unit: &Unit) -> &Path {
+        if !self.primary.contains(unit) {
+            //TODO: visit the cache
+            return self.bin_cache.as_path();
+        }
         self.layout(unit.kind).deps()
     }
 

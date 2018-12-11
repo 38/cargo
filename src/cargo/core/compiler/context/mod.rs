@@ -361,6 +361,12 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
         self.files.as_ref().unwrap().outputs(unit, self.bcx)
     }
 
+    /// Examine if the target is already in the global cache
+    /// TODO: Anything needs to be changed ?
+    pub fn in_cache(&self, unit: &Unit<'a>) -> bool {
+        self.files.as_ref().unwrap().in_cache(unit, self.bcx)
+    }
+
     /// For a package, return all targets which are registered as dependencies
     /// for that package.
     // TODO: this ideally should be `-> &[Unit<'a>]`
