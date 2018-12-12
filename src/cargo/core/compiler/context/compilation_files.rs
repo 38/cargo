@@ -13,6 +13,8 @@ use super::{BuildContext, Context, FileFlavor, Kind, Layout, Unit};
 use crate::core::{TargetKind, Workspace};
 use crate::util::{self, CargoResult};
 
+use super::BinaryCache;
+
 #[derive(Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Metadata(u64);
 
@@ -34,7 +36,7 @@ pub struct CompilationFiles<'a, 'cfg: 'a> {
     roots: Vec<Unit<'a>>,
     primary: HashSet<Unit<'a>>,
 
-    bin_cache: PathBuf, //TODO: implement the actual binary cache
+    bin_cache: BinaryCache, //TODO: implement the actual binary cache
 
     ws: &'a Workspace<'cfg>,
     metas: HashMap<Unit<'a>, Option<Metadata>>,
@@ -97,7 +99,7 @@ impl<'a, 'cfg: 'a> CompilationFiles<'a, 'cfg> {
             metas,
             outputs,
             primary,
-            bin_cache: "/tmp/cache/".parse().unwrap() //TOOD
+            bin_cache: BinaryCache::new(1024*1024*512, "/tmp/cache".parse().unwrap())
         }
     }
 
@@ -136,8 +138,10 @@ impl<'a, 'cfg: 'a> CompilationFiles<'a, 'cfg> {
         } else {
             /* Should we redirect the depdency to global cache ? */
             if !self.primary.contains(unit) {
-                //TODO: visit the cache
-                return self.bin_cache.clone();
+
+                // TODO: determine if we need to use the cache
+
+                return self.bin_cache.binary_dir().to_path_buf();
             }
             self.deps_dir(unit).to_path_buf()
         }
@@ -151,20 +155,15 @@ impl<'a, 'cfg: 'a> CompilationFiles<'a, 'cfg> {
             let outputs = self.outputs(unit, bcx);
             if let Ok(outputs) = outputs 
             {
-                return !outputs.iter().any(|out| {
-                    // TODO: how to touch the file
-                    let mt = std::fs::metadata(out.path.as_path());
-                    !mt.is_ok()
-                });
+                return !outputs.iter().any(|out| self.bin_cache.in_cache(out.path.as_path()));
             }
         }
 
         return false;
     }
 
-    pub fn cache_dir(&self) -> &str {
-        // TODO: determine the cache location
-        return "/tmp/cache";
+    pub fn cache_dir(&self) -> &Path {
+        self.bin_cache.binary_dir()
     }
 
     pub fn export_dir(&self) -> Option<PathBuf> {
@@ -192,8 +191,8 @@ impl<'a, 'cfg: 'a> CompilationFiles<'a, 'cfg> {
     /// specified unit.
     pub fn deps_dir(&self, unit: &Unit) -> &Path {
         if !self.primary.contains(unit) {
-            //TODO: visit the cache
-            return self.bin_cache.as_path();
+            //TODO: determine if we need to use the cache
+            return self.bin_cache.binary_dir();
         }
         self.layout(unit.kind).deps()
     }

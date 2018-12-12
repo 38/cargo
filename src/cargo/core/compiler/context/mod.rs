@@ -27,6 +27,9 @@ mod compilation_files;
 use self::compilation_files::CompilationFiles;
 pub use self::compilation_files::{Metadata, OutputFile};
 
+mod binary_cache;
+use self::binary_cache::BinaryCache;
+
 /// All information needed to define a Unit.
 ///
 /// A unit is an object that has enough information so that cargo knows how to build it.
